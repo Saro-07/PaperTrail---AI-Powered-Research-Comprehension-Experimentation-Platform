@@ -1,12 +1,4 @@
-Absolutely dude. For this repository, I would make the README look like a **serious final-year/research software project**, not a basic GitHub template.
 
-Below is a **complete ready-to-paste `README.md`** with Mermaid architecture diagrams, workflow visualizations, module explanations, technology stack, API documentation, reliability design, project structure, roadmap, and attribution.
-
-One important distinction is built in: the README separates the **currently implemented baseline** from the **final-year development roadmap**, so we don't claim features before we actually implement them.
-
----
-
-````markdown
 # PaperTrail
 ### AI-Powered Research Comprehension, Experimentation & Evidence Platform
 

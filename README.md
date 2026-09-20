@@ -2,11 +2,11 @@
 # PaperTrail
 ### AI-Powered Research Comprehension, Experimentation & Evidence Platform
 
-<p align="center">
+<p>
   <strong>Turn complex research papers into an interactive research workspace.</strong>
 </p>
 
-<p align="center">
+<p>
   Upload a research paper → Understand its ideas → Explore its mathematics → Execute its core algorithm → Verify evidence → Analyze results → Compare research
 </p>
 

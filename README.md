@@ -1863,13 +1863,4 @@ Each dependency remains subject to its respective license and terms.
 
 ```
 
-### A couple of important changes I deliberately made
 
-I **didn't describe the current prototype as already supporting every format or every module**, because that would make the README technically inaccurate. The current GitHub implementation actually documents the three core modules—Math Simulator, Idea Tree, and Code Sandbox—and its backend currently centers on PDF parsing plus those extraction endpoints. 
-
-I also separated **implemented**, **in development**, and **planned** capabilities. That's important for your final-year project because later we can update the status as we genuinely implement each component.
-
-And I would keep the **development/provenance note**. The source repository is someone else's implementation, so the cleanest approach is to document honestly that your repository started from an existing working prototype and that your contribution is the subsequent restructuring, implementation, testing, and expansion.
-
-This README is also designed so that the **Mermaid diagrams render directly on GitHub**, giving your repository a much more professional appearance.
-```

@@ -1,30 +1,53 @@
 import os
 import json
+import re
 from groq import Groq
 from dotenv import load_dotenv
 from schemas import EquationSandboxSpec, IdeaTreeSpec, RunnableAlgorithmSpec
 
 load_dotenv()
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-
 MODEL = "openai/gpt-oss-20b"
+
+
+def _get_groq_client():
+    """
+    Lazily initializes the Groq client. This prevents the server from crashing
+    at startup if GROQ_API_KEY is not yet defined in the environment.
+    """
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "GROQ_API_KEY environment variable is not configured. "
+            "Please set GROQ_API_KEY in your environment or .env file to enable AI extraction."
+        )
+    return Groq(api_key=api_key)
+
+
+def _prepare_paper_context(markdown_text: str, max_chars: int = 75000) -> str:
+    """
+    Prepares paper markdown within Groq context window (up to 75,000 chars / ~18k tokens).
+    If the paper exceeds max_chars, preserves both the opening sections (abstract, intro, math)
+    and the closing sections (results, impact, conclusion, appendix) so vital details are not lost.
+    """
+    if len(markdown_text) <= max_chars:
+        return markdown_text
+
+    head_len = int(max_chars * 0.75)
+    tail_len = max_chars - head_len
+    return (
+        markdown_text[:head_len]
+        + "\n\n... [intermediate sections omitted for brevity] ...\n\n"
+        + markdown_text[-tail_len:]
+    )
 
 
 def _call_groq_with_retry(messages, temperature=0.2, json_mode=True, max_attempts=2):
     """
-    Calls the Groq API with automatic retries. Occasionally the model's
-    output fails Groq's own JSON schema validation (a generation issue on
-    Groq's side, not necessarily a bug in our prompt) and comes back with
-    an empty failed_generation, giving us nothing to debug directly.
-
-    Strategy: try with strict JSON mode up to max_attempts times. If those
-    all fail, fall back to a final attempt WITHOUT strict JSON mode --
-    the model is instructed in the prompt to return only JSON anyway, and
-    plain text mode sometimes succeeds where the stricter validated mode
-    gets rejected on certain inputs. The caller's json.loads() step still
-    validates the actual structure either way.
+    Calls the Groq API with automatic retries and fallback to non-strict mode
+    if strict schema validation encounters generation quirks.
     """
+    client = _get_groq_client()
     last_error = None
 
     for attempt in range(max_attempts):
@@ -41,7 +64,7 @@ def _call_groq_with_retry(messages, temperature=0.2, json_mode=True, max_attempt
             continue
 
     if json_mode:
-        # Final fallback: same prompt, no strict JSON mode enforcement.
+        # Final fallback: same prompt, without strict JSON mode flag.
         try:
             response = client.chat.completions.create(
                 model=MODEL,
@@ -57,29 +80,34 @@ def _call_groq_with_retry(messages, temperature=0.2, json_mode=True, max_attempt
 
 def _parse_json_response(raw_content: str) -> dict:
     """
-    Parses the model's JSON response, stripping markdown code fences if
-    present. The fallback (non-strict-JSON-mode) path in
-    _call_groq_with_retry can sometimes wrap the JSON in ```json ... ```
-    even when told not to, so we handle that defensively here.
+    Robustly parses the model's JSON response, stripping markdown code fences
+    and extracting embedded JSON blocks even if preamble or trailing text is present.
     """
     if not raw_content or not raw_content.strip():
         raise ValueError(
             "LLM returned an empty response. This usually means a rate limit "
-            "was hit (check console.groq.com for usage limits) or a transient "
-            "API issue -- wait a moment and try again."
+            "was reached or a transient API issue occurred -- please wait a moment and try again."
         )
 
     cleaned = raw_content.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```")[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:]
-        cleaned = cleaned.strip()
+
+    # Strip markdown code blocks if present
+    if "```" in cleaned:
+        fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
+        if fence_match:
+            cleaned = fence_match.group(1).strip()
+
+    # If still not starting with '{', attempt to extract outermost JSON object
+    if not (cleaned.startswith("{") and cleaned.endswith("}")):
+        json_match = re.search(r"(\{[\s\S]*\})", cleaned)
+        if json_match:
+            cleaned = json_match.group(1).strip()
 
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError as e:
         raise ValueError(f"LLM did not return valid JSON: {e}\nRaw output: {raw_content}")
+
 
 EXTRACTION_SYSTEM_PROMPT = """You are an expert at reading academic research papers and extracting a mathematical equation into an interactive, slider-friendly format.
 
@@ -137,17 +165,15 @@ Respond with ONLY valid JSON matching this exact structure, no other text, no ma
 def extract_math_schema(markdown_text: str) -> EquationSandboxSpec:
     """
     Sends the paper's markdown to Groq/Llama and parses the response into
-    an EquationSandboxSpec. Truncates very long papers to stay within
-    context limits, since we only need the equation-relevant sections.
+    an EquationSandboxSpec. Preserves up to 75,000 characters covering
+    the essential mathematical formulation.
     """
-    # Keep the request reasonably sized. 15k characters is plenty for
-    # a model to find the core equation without hitting token limits.
-    truncated_text = markdown_text[:15000]
+    paper_context = _prepare_paper_context(markdown_text, max_chars=75000)
 
     raw_content = _call_groq_with_retry(
         messages=[
             {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Here is the paper text:\n\n{truncated_text}"},
+            {"role": "user", "content": f"Here is the paper text:\n\n{paper_context}"},
         ],
     )
 
@@ -221,12 +247,12 @@ def extract_idea_tree_schema(markdown_text: str) -> IdeaTreeSpec:
     an IdeaTreeSpec — the 4-stage narrative arc used to render the
     Idea Tree tab's Mermaid.js flowchart.
     """
-    truncated_text = markdown_text[:15000]
+    paper_context = _prepare_paper_context(markdown_text, max_chars=75000)
 
     raw_content = _call_groq_with_retry(
         messages=[
             {"role": "system", "content": IDEA_TREE_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Here is the paper text:\n\n{truncated_text}"},
+            {"role": "user", "content": f"Here is the paper text:\n\n{paper_context}"},
         ],
     )
 
@@ -279,12 +305,12 @@ def extract_algorithm_schema(markdown_text: str) -> RunnableAlgorithmSpec:
     a RunnableAlgorithmSpec — a synthetic, runnable Python version of the
     paper's algorithm, used by the Code Sandbox tab.
     """
-    truncated_text = markdown_text[:15000]
+    paper_context = _prepare_paper_context(markdown_text, max_chars=75000)
 
     raw_content = _call_groq_with_retry(
         messages=[
             {"role": "system", "content": ALGORITHM_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Here is the paper text:\n\n{truncated_text}"},
+            {"role": "user", "content": f"Here is the paper text:\n\n{paper_context}"},
         ],
     )
 
@@ -292,6 +318,7 @@ def extract_algorithm_schema(markdown_text: str) -> RunnableAlgorithmSpec:
 
     spec = RunnableAlgorithmSpec(**parsed_json)
     return spec
+
 
 
 FIX_CODE_SYSTEM_PROMPT = """You are an expert Python debugger. You will be given a piece of Python code that failed with an error, along with the error message. Fix the code so it runs successfully.

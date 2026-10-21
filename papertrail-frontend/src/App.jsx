@@ -3,9 +3,23 @@ import axios from 'axios';
 import Plot from 'react-plotly.js';
 import IdeaTree from './Ideatree';
 import CodeSandbox from './CodeSandbox';
+import MathView from './MathView';
 import './App.css';
 
-const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const resolveDefaultBackend = () => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('PAPERTRAIL_API_URL');
+    if (saved) return saved;
+  }
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ) {
+    return 'http://127.0.0.1:8000';
+  }
+  return '';
+};
 
 // Built-in authentic specimen for instant demonstration & quick review
 const SAMPLE_PAPER = {
@@ -142,6 +156,10 @@ function App() {
   const [activeTab, setActiveTab] = useState('math');
   const [isDragging, setIsDragging] = useState(false);
 
+  const [backendUrl, setBackendUrl] = useState(resolveDefaultBackend);
+  const [showServerModal, setShowServerModal] = useState(false);
+  const [serverUrlInput, setServerUrlInput] = useState(resolveDefaultBackend);
+
   const [markdown, setMarkdown] = useState(null);
   const [paperTitle, setPaperTitle] = useState('');
   const [paperCitation, setPaperCitation] = useState('');
@@ -207,6 +225,14 @@ function App() {
       return;
     }
 
+    if (!backendUrl) {
+      setError(
+        'Backend server endpoint is not configured. Click "⚙ API Server" in the top bar to set your live backend URL, or explore our built-in benchmark specimen below.'
+      );
+      setShowServerModal(true);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setMathSpec(null);
@@ -219,13 +245,13 @@ function App() {
     formData.append('file', file);
 
     try {
-      const parseResponse = await axios.post(`${BACKEND_URL}/parse-pdf`, formData, {
+      const parseResponse = await axios.post(`${backendUrl}/parse-pdf`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const parsedMarkdown = parseResponse.data.markdown;
       setMarkdown(parsedMarkdown);
 
-      const extractResponse = await axios.post(`${BACKEND_URL}/extract-math`, {
+      const extractResponse = await axios.post(`${backendUrl}/extract-math`, {
         markdown: parsedMarkdown,
       });
       const spec = extractResponse.data;
@@ -237,7 +263,10 @@ function App() {
       });
       setParamValues(initialValues);
     } catch (err) {
-      const message = err.response?.data?.detail || err.message || 'Something went wrong during extraction.';
+      let message = err.response?.data?.detail || err.message || 'Something went wrong during extraction.';
+      if (err.message === 'Network Error') {
+        message = `Unable to connect to backend server at "${backendUrl}". Please ensure the server is online, allows CORS, and is served over HTTPS if visiting from an HTTPS domain.`;
+      }
       setError(message);
     } finally {
       setLoading(false);
@@ -308,17 +337,17 @@ function App() {
 
     setPlotLoading(true);
     try {
-      const response = await axios.post(`${BACKEND_URL}/evaluate-formula`, {
+      const response = await axios.post(`${backendUrl}/evaluate-formula`, {
         python_formula_function: mathSpec.python_formula_function,
         parameters: paramValues,
       });
       setPlotData(response.data);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to evaluate formula.');
+      setError(err.response?.data?.detail || 'Failed to evaluate formula on backend.');
     } finally {
       setPlotLoading(false);
     }
-  }, [mathSpec, paramValues, isSampleMode]);
+  }, [mathSpec, paramValues, isSampleMode, backendUrl]);
 
   useEffect(() => {
     if (mathSpec && Object.keys(paramValues).length > 0) {
@@ -331,30 +360,38 @@ function App() {
     setActiveTab(tab);
 
     if (tab === 'ideatree' && !ideaTreeSpec && markdown && !isSampleMode) {
+      if (!backendUrl) {
+        setError('Backend server is not configured to extract idea tree.');
+        return;
+      }
       setIdeaTreeLoading(true);
       setError(null);
       try {
-        const response = await axios.post(`${BACKEND_URL}/extract-idea-tree`, {
+        const response = await axios.post(`${backendUrl}/extract-idea-tree`, {
           markdown,
         });
         setIdeaTreeSpec(response.data);
       } catch (err) {
-        setError(err.response?.data?.detail || 'Failed to extract idea tree.');
+        setError(err.response?.data?.detail || 'Failed to extract idea tree from backend.');
       } finally {
         setIdeaTreeLoading(false);
       }
     }
 
     if (tab === 'codesandbox' && !algorithmSpec && markdown && !isSampleMode) {
+      if (!backendUrl) {
+        setError('Backend server is not configured to extract algorithm.');
+        return;
+      }
       setAlgorithmLoading(true);
       setError(null);
       try {
-        const response = await axios.post(`${BACKEND_URL}/extract-algorithm`, {
+        const response = await axios.post(`${backendUrl}/extract-algorithm`, {
           markdown,
         });
         setAlgorithmSpec(response.data);
       } catch (err) {
-        setError(err.response?.data?.detail || 'Failed to extract algorithm.');
+        setError(err.response?.data?.detail || 'Failed to extract algorithm from backend.');
       } finally {
         setAlgorithmLoading(false);
       }
@@ -377,13 +414,49 @@ function App() {
               <p className="pt-main-subtitle">
                 Automated research paper workbench: extract formulations into reactive models, trace concept genealogies, and execute validated algorithm translations.
               </p>
+
+              <div className="pt-server-status-row">
+                <button
+                  type="button"
+                  className="pt-server-status-pill"
+                  onClick={() => {
+                    setServerUrlInput(backendUrl);
+                    setShowServerModal(true);
+                  }}
+                  title="Configure backend server URL"
+                >
+                  <span className={`pt-status-dot ${backendUrl ? 'green' : 'amber'}`} />
+                  <span>
+                    Backend API: {backendUrl ? backendUrl.replace(/^https?:\/\//, '') : 'Offline / Click to Configure'}
+                  </span>
+                  <span className="pt-pill-action">⚙ Settings</span>
+                </button>
+              </div>
             </header>
 
             {error && (
               <div className="pt-error-banner">
-                <span className="pt-error-icon">!</span>
-                <div>
-                  <strong>Processing Error:</strong> {error}
+                <div className="pt-error-banner-top">
+                  <span className="pt-error-icon">!</span>
+                  <div className="pt-error-text">
+                    <strong>Processing Error:</strong> {error}
+                  </div>
+                </div>
+                <div className="pt-error-actions">
+                  <button
+                    type="button"
+                    className="pt-error-action-btn primary"
+                    onClick={() => setShowServerModal(true)}
+                  >
+                    ⚙ Configure Server URL
+                  </button>
+                  <button
+                    type="button"
+                    className="pt-error-action-btn secondary"
+                    onClick={handleLoadSample}
+                  >
+                    ⚡ Test Benchmark Specimen (Focal Loss)
+                  </button>
                 </div>
               </div>
             )}
@@ -556,6 +629,18 @@ function App() {
               </div>
 
               <div className="pt-navbar-right">
+                <button
+                  type="button"
+                  className="pt-btn-server-nav"
+                  onClick={() => {
+                    setServerUrlInput(backendUrl);
+                    setShowServerModal(true);
+                  }}
+                  title="Configure backend server URL"
+                >
+                  <span className={`pt-status-dot ${backendUrl ? 'green' : 'amber'}`} />
+                  <span>API Settings</span>
+                </button>
                 <button className="pt-btn-return" onClick={handleReset} title="Upload a different paper">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="19" y1="12" x2="5" y2="12" />
@@ -634,7 +719,9 @@ function App() {
                         {/* Formula Block */}
                         <div className="pt-illuminated-formula-block compact">
                           <span className="pt-formula-label">CORE MATHEMATICAL EQUATION</span>
-                          <div className="pt-formula-content">{mathSpec.latex_formula}</div>
+                          <div className="pt-formula-content">
+                            <MathView math={mathSpec.latex_formula} displayMode={true} />
+                          </div>
                         </div>
                       </div>
 
@@ -656,7 +743,9 @@ function App() {
                               <div key={param.name} className="pt-brass-param-card compact">
                                 <div className="pt-param-header">
                                   <div className="pt-param-name-group">
-                                    <span className="pt-param-symbol">{param.symbol}</span>
+                                    <span className="pt-param-symbol">
+                                      <MathView math={param.symbol} displayMode={false} />
+                                    </span>
                                     <span className="pt-param-title">{param.name}</span>
                                   </div>
                                   <span className="pt-param-numeric-badge">
@@ -789,10 +878,93 @@ function App() {
                     </div>
                   )}
 
-                  {algorithmSpec && <CodeSandbox spec={algorithmSpec} />}
+                  {algorithmSpec && <CodeSandbox spec={algorithmSpec} backendUrl={backendUrl} />}
                 </div>
               )}
             </main>
+          </div>
+        )}
+
+        {/* Server Endpoint Configuration Modal */}
+        {showServerModal && (
+          <div className="pt-modal-overlay" onClick={() => setShowServerModal(false)}>
+            <div className="pt-modal-card" onClick={(e) => e.stopPropagation()}>
+              <div className="pt-modal-header">
+                <div className="pt-modal-title-group">
+                  <span className="pt-modal-icon">⚙</span>
+                  <h3 className="pt-modal-title">Backend API Server Endpoint</h3>
+                </div>
+                <button
+                  type="button"
+                  className="pt-modal-close-btn"
+                  onClick={() => setShowServerModal(false)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="pt-modal-body">
+                <p className="pt-modal-text">
+                  Set the FastAPI backend base URL for PDF parsing, formula evaluation, and LLM extractions.
+                </p>
+
+                <div className="pt-input-wrapper">
+                  <label className="pt-input-label">Server Base URL</label>
+                  <input
+                    type="url"
+                    className="pt-server-url-field"
+                    placeholder="https://your-backend.onrender.com or http://127.0.0.1:8000"
+                    value={serverUrlInput}
+                    onChange={(e) => setServerUrlInput(e.target.value)}
+                  />
+                </div>
+
+                <div className="pt-quick-presets">
+                  <span className="pt-preset-label">Presets:</span>
+                  <button
+                    type="button"
+                    className="pt-preset-pill"
+                    onClick={() => setServerUrlInput('http://127.0.0.1:8000')}
+                  >
+                    Localhost (8000)
+                  </button>
+                  <button
+                    type="button"
+                    className="pt-preset-pill"
+                    onClick={() => setServerUrlInput('')}
+                  >
+                    Clear / Offline Specimen
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-modal-footer">
+                <button
+                  type="button"
+                  className="pt-btn pt-btn-secondary"
+                  onClick={() => setShowServerModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="pt-btn pt-btn-primary"
+                  onClick={() => {
+                    const cleaned = serverUrlInput.trim().replace(/\/+$/, '');
+                    setBackendUrl(cleaned);
+                    if (cleaned) {
+                      localStorage.setItem('PAPERTRAIL_API_URL', cleaned);
+                    } else {
+                      localStorage.removeItem('PAPERTRAIL_API_URL');
+                    }
+                    setShowServerModal(false);
+                    setError(null);
+                  }}
+                >
+                  Save & Apply
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -800,4 +972,4 @@ function App() {
   );
 }
 
-export default App;
+export default App;

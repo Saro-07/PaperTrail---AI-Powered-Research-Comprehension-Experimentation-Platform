@@ -438,19 +438,68 @@
 
 /* Error Banner */
 .pt-error-banner {
-  margin: 24px auto;
-  max-width: 660px;
+  margin: 20px auto 24px;
+  max-width: 780px;
   background: #fef2f2;
   border: 1px solid #fecaca;
   color: #991b1b;
-  border-radius: 8px;
-  padding: 12px 18px;
+  border-radius: 10px;
+  padding: 14px 18px;
   font-size: 0.88rem;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 12px;
   box-shadow: var(--shadow-xs);
   text-align: left;
+}
+
+.pt-error-banner-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.pt-error-text {
+  flex: 1;
+  line-height: 1.5;
+}
+
+.pt-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-left: 34px;
+}
+
+.pt-error-action-btn {
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.pt-error-action-btn.primary {
+  background: #991b1b;
+  color: #ffffff;
+}
+
+.pt-error-action-btn.primary:hover {
+  background: #7f1d1d;
+}
+
+.pt-error-action-btn.secondary {
+  background: #ffffff;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.pt-error-action-btn.secondary:hover {
+  background: #fee2e2;
 }
 
 .pt-error-icon {
@@ -465,6 +514,7 @@
   font-weight: bold;
   font-size: 0.8rem;
   flex-shrink: 0;
+  margin-top: 1px;
 }
 
 /* ---------- Empty State: Three Analytical Modules ---------- */
@@ -1993,3 +2043,256 @@
     transform: translateY(0);
   }
 }
+
+/* ==========================================================================
+   SERVER STATUS PILL, CONFIG MODAL & KATEX TYPOGRAPHY
+   ========================================================================== */
+
+.pt-server-status-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.pt-server-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9999px;
+  padding: 5px 14px;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: all 0.2s ease;
+}
+
+.pt-server-status-pill:hover {
+  background: #f8fafc;
+  border-color: var(--border-strong);
+  color: var(--text-main);
+  transform: translateY(-1px);
+}
+
+.pt-pill-action {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #0284c7;
+  padding-left: 4px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.pt-btn-server-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 5px 11px;
+  font-family: var(--font-sans);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pt-btn-server-nav:hover {
+  background: #f1f5f9;
+  color: var(--text-main);
+}
+
+.pt-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pt-status-dot.green {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+
+.pt-status-dot.amber {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+}
+
+/* Modal Overlay & Card */
+.pt-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: ptFadeIn 0.2s ease-out;
+  padding: 20px;
+}
+
+.pt-modal-card {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 520px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  animation: ptFadeIn 0.25s ease-out;
+}
+
+.pt-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: #f8fafc;
+}
+
+.pt-modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pt-modal-icon {
+  font-size: 1.1rem;
+}
+
+.pt-modal-title {
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.pt-modal-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+  border-radius: 4px;
+}
+
+.pt-modal-close-btn:hover {
+  color: #0f172a;
+  background: #e2e8f0;
+}
+
+.pt-modal-body {
+  padding: 22px 24px;
+}
+
+.pt-modal-text {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 0 0 18px;
+}
+
+.pt-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.pt-input-label {
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #475569;
+}
+
+.pt-server-url-field {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text-main);
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.pt-server-url-field:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+}
+
+.pt-quick-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pt-preset-label {
+  font-size: 0.74rem;
+  color: var(--text-light);
+  font-weight: 600;
+}
+
+.pt-preset-pill {
+  background: #f1f5f9;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9999px;
+  padding: 3px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pt-preset-pill:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.pt-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border-subtle);
+  background: #f8fafc;
+}
+
+/* KaTeX Polish */
+.pt-math-rendered {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.pt-formula-content .katex-display {
+  margin: 4px 0 !important;
+}
+
+.pt-formula-content .katex {
+  font-size: 1.25rem;
+  color: #0f172a;
+}
+
+.pt-param-symbol .katex {
+  font-size: 1.05rem;
+  color: var(--math-accent);
+  font-weight: 700;
+}

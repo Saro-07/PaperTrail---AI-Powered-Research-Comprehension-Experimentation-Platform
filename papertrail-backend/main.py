@@ -19,12 +19,12 @@ app = FastAPI(title="PaperTrail Backend")
 
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB limit on uploaded PDFs
 
-# Allow the React frontend (running on a different port) to call this API.
-# Tighten allow_origins to your actual frontend URL before deploying anywhere public.
+# Allow frontend origins to call this API safely.
+ALLOWED_ORIGINS = [orig.strip() for orig in os.environ.get("ALLOWED_ORIGINS", "*").split(",")]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False if "*" in ALLOWED_ORIGINS else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -45,7 +45,7 @@ async def parse_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
-    # pymupdf4llm needs a real file path, so we write the upload to a temp file first.
+    tmp_path = None
     try:
         contents = await file.read()
 
@@ -58,12 +58,14 @@ async def parse_pdf(file: UploadFile = File(...)):
 
         markdown_content = pymupdf4llm.to_markdown(tmp_path)
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse PDF: {str(e)}")
 
     finally:
-        # Clean up the temp file regardless of success or failure.
-        if os.path.exists(tmp_path):
+        # Clean up the temp file safely
+        if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
 
     return {
@@ -102,19 +104,50 @@ class EvaluateFormulaRequest(BaseModel):
     parameters: dict
 
 
+def _validate_safe_formula_ast(code_str: str):
+    """
+    Validates that the generated formula code contains only safe mathematical
+    operations and prevents sandbox escapes or dunder traversal.
+    """
+    import ast
+
+    forbidden_attrs = {
+        "__class__",
+        "__bases__",
+        "__subclasses__",
+        "__globals__",
+        "__builtins__",
+        "__import__",
+        "__code__",
+        "__reduce__",
+    }
+    forbidden_calls = {"eval", "exec", "open", "compile", "breakpoint", "__import__", "input"}
+
+    try:
+        tree = ast.parse(code_str)
+    except SyntaxError as e:
+        raise HTTPException(status_code=400, detail=f"Syntax error in formula: {e}")
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name not in {"numpy", "math"}:
+                    raise HTTPException(status_code=400, detail=f"Import of module '{alias.name}' is not permitted.")
+        elif isinstance(node, ast.ImportFrom):
+            if node.module not in {"numpy", "math"}:
+                raise HTTPException(status_code=400, detail=f"Import from module '{node.module}' is not permitted.")
+        elif isinstance(node, ast.Attribute) and (node.attr.startswith("__") or node.attr in forbidden_attrs):
+            raise HTTPException(status_code=400, detail=f"Access to attribute '{node.attr}' is prohibited.")
+        elif isinstance(node, ast.Name) and node.id in forbidden_calls:
+            raise HTTPException(status_code=400, detail=f"Calling '{node.id}' is prohibited.")
+
+
 @app.post("/evaluate-formula")
 async def evaluate_formula(request: EvaluateFormulaRequest):
     """
     Executes the LLM-generated Python formula function with the given
-    parameter values and returns fresh x/y arrays for plotting. This lets
-    the frontend re-plot the curve live whenever a slider moves, without
-    needing to run Python in the browser.
-
-    Safety: the execution namespace only exposes numpy and a small
-    whitelist of safe read-only builtins (range, len, enumerate, min, max,
-    abs, round, sum) -- not the full builtins set, and never anything that
-    touches the filesystem, network, or process (no open, no import, no
-    eval/exec, no __import__).
+    parameter values and returns fresh x/y arrays for plotting.
+    Protected with strict AST validation and restricted builtins.
     """
     import numpy as np
 
@@ -132,35 +165,33 @@ async def evaluate_formula(request: EvaluateFormulaRequest):
 
     safe_namespace = {"np": np, "__builtins__": safe_builtins}
 
-    # Normalize line endings. Windows-style \r\n (or stray \r) sneaking into
-    # the generated code string can cause "unexpected character after line
-    # continuation character" errors in exec(), so we strip them here.
+    # Normalize line endings
     normalized_code = request.python_formula_function.replace("\r\n", "\n").replace("\r", "\n")
 
-    # Safety net: strip any stray import lines. The prompt instructs the LLM
-    # never to include imports (np is already provided), but LLMs don't
-    # always follow instructions perfectly, and imports would fail anyway
-    # since __builtins__ is locked down for safety.
+    # Strip any stray import lines
     code_lines = [
         line for line in normalized_code.split("\n")
         if not line.strip().startswith(("import ", "from "))
     ]
     normalized_code = "\n".join(code_lines)
 
+    # Perform AST safety check
+    _validate_safe_formula_ast(normalized_code)
+
     try:
         exec(normalized_code, safe_namespace)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Formula code failed to define: {str(e)}")
 
-    # Find the function the LLM defined (it's the only callable added to the namespace).
+    # Find the function the LLM defined
     func = None
     for value in safe_namespace.values():
-        if callable(value):
+        if callable(value) and value not in safe_builtins.values():
             func = value
             break
 
     if func is None:
-        raise HTTPException(status_code=400, detail="No function found in the generated code.")
+        raise HTTPException(status_code=400, detail="No callable function found in the generated code.")
 
     try:
         x, y = func(**request.parameters)
@@ -224,29 +255,35 @@ async def extract_algorithm(request: ExtractAlgorithmRequest):
 
 def _run_code_in_subprocess(code: str, timeout_seconds: int = 5) -> dict:
     """
-    Executes Python code in an isolated subprocess and captures its
-    stdout/stderr. Using a subprocess (rather than in-process exec) gives
-    real process isolation and a hard timeout, so runaway or malicious
-    generated code can't hang or crash the main server.
+    Executes Python code in an isolated subprocess with strict environment
+    sanitization (stripping API keys and host secrets) and a hard timeout.
     """
-    normalized_code = code.replace("\r\n", "\n").replace("\r", "\n")
+    # Block dangerous system / network modules before spawning
+    blocked_modules = ["socket", "requests", "urllib", "http", "ftplib", "subprocess", "multiprocessing", "shutil", "winreg", "ctypes"]
+    for mod in blocked_modules:
+        if f"import {mod}" in code or f"from {mod}" in code:
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": f"Security restriction: Importing '{mod}' is not permitted in sandbox.",
+            }
 
-    # Prepend a numpy import in the subprocess itself (this runs as a real,
-    # separate Python process, so imports here are fine and expected --
-    # this is different from the in-process /evaluate-formula exec(), which
-    # has no import capability at all).
+    normalized_code = code.replace("\r\n", "\n").replace("\r", "\n")
     full_code = "import numpy as np\n" + normalized_code
 
+    tmp_path = None
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as tmp:
         tmp.write(full_code)
         tmp_path = tmp.name
 
-    # Force UTF-8 for the subprocess's own stdout/stderr streams. Without
-    # this, Windows defaults the child process's print() encoding to
-    # cp1252, which crashes on non-ASCII characters (e.g. Greek letters
-    # like alpha/gamma that LLM-generated code commonly includes).
-    subprocess_env = os.environ.copy()
-    subprocess_env["PYTHONIOENCODING"] = "utf-8"
+    # Sanitize environment: DO NOT leak GROQ_API_KEY or server secrets to subprocess
+    subprocess_env = {
+        "PYTHONIOENCODING": "utf-8",
+        "PATH": os.environ.get("PATH", ""),
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", "C:\\Windows"),
+        "TEMP": tempfile.gettempdir(),
+        "TMP": tempfile.gettempdir(),
+    }
 
     try:
         result = subprocess.run(
@@ -269,7 +306,7 @@ def _run_code_in_subprocess(code: str, timeout_seconds: int = 5) -> dict:
             "stderr": f"Code timed out after {timeout_seconds} seconds.",
         }
     finally:
-        if os.path.exists(tmp_path):
+        if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import mermaid from 'mermaid';
 
 mermaid.initialize({
@@ -85,20 +85,19 @@ function buildMermaidDefinition(nodes) {
 
 function IdeaTree({ spec }) {
   const mermaidContainerRef = useRef(null);
-  const [selectedNode, setSelectedNode] = useState(null);
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [renderError, setRenderError] = useState(null);
   const [viewMode, setViewMode] = useState('flowchart'); // 'flowchart' | 'mermaid'
   const [isPlayingTour, setIsPlayingTour] = useState(false);
   const [activeStageFilter, setActiveStageFilter] = useState(null);
 
-  const nodes = spec?.nodes || [];
+  const nodes = useMemo(() => spec?.nodes || [], [spec]);
 
-  // Set default selected node
-  useEffect(() => {
-    if (nodes.length > 0 && !selectedNode) {
-      setSelectedNode(nodes[0]);
-    }
-  }, [nodes, selectedNode]);
+  // Derived selected node avoids synchronous setState inside effect
+  const selectedNode = useMemo(() => {
+    if (!nodes.length) return null;
+    return nodes.find((n) => n.node_id === selectedNodeId) || nodes[0];
+  }, [nodes, selectedNodeId]);
 
   // Mermaid Render (fallback / toggle view)
   useEffect(() => {
@@ -117,7 +116,7 @@ function IdeaTree({ spec }) {
             const node = nodes[index];
             if (node) {
               el.style.cursor = 'pointer';
-              el.addEventListener('click', () => setSelectedNode(node));
+              el.addEventListener('click', () => setSelectedNodeId(node.node_id));
             }
           });
         }
@@ -132,10 +131,10 @@ function IdeaTree({ spec }) {
     if (!isPlayingTour || nodes.length === 0) return;
 
     const interval = setInterval(() => {
-      setSelectedNode((prev) => {
-        const currentIndex = nodes.findIndex((n) => n.node_id === prev?.node_id);
+      setSelectedNodeId((prevId) => {
+        const currentIndex = nodes.findIndex((n) => n.node_id === prevId);
         const nextIndex = (currentIndex + 1) % nodes.length;
-        return nodes[nextIndex];
+        return nodes[nextIndex].node_id;
       });
     }, 4200);
 
@@ -147,22 +146,21 @@ function IdeaTree({ spec }) {
   };
 
   const handleSelectNode = (node) => {
-    setSelectedNode(node);
-    // don't pause tour abruptly, or allow user inspection
+    setSelectedNodeId(node.node_id);
   };
 
   const handleNextNode = () => {
     if (!selectedNode || nodes.length === 0) return;
     const currentIndex = nodes.findIndex((n) => n.node_id === selectedNode.node_id);
     const nextIndex = (currentIndex + 1) % nodes.length;
-    setSelectedNode(nodes[nextIndex]);
+    setSelectedNodeId(nodes[nextIndex].node_id);
   };
 
   const handlePrevNode = () => {
     if (!selectedNode || nodes.length === 0) return;
     const currentIndex = nodes.findIndex((n) => n.node_id === selectedNode.node_id);
     const prevIndex = (currentIndex - 1 + nodes.length) % nodes.length;
-    setSelectedNode(nodes[prevIndex]);
+    setSelectedNodeId(nodes[prevIndex].node_id);
   };
 
   if (!spec) return null;
